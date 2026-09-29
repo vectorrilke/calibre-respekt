@@ -30,7 +30,7 @@ BASE = 'https://www.respekt.cz'
 
 
 class Respekt(BasicNewsRecipe):
-    title = 'Respekt'
+    title = 'Respekt Magazine — EPUB'
     __author__ = 'Vector Rilke'
     description = 'Český týdeník Respekt - poslední vydání jako EPUB (vyžaduje předplatné)'
     language = 'cs'
@@ -115,8 +115,9 @@ class Respekt(BasicNewsRecipe):
                         del item.attrib['properties']
             for item in manifest.findall('o:item[@id="respekt-cover"]', ns):
                 manifest.remove(item)
-            etree.SubElement(manifest, '{%s}item' % ns['o'], id='respekt-cover', href='respekt_cover.jpg',
-                             **{'media-type': 'image/jpeg', 'properties': 'cover-image'})
+            etree.SubElement(
+                manifest, '{%s}item' % ns['o'], id='respekt-cover', href='respekt_cover.jpg', **{'media-type': 'image/jpeg', 'properties': 'cover-image'}
+            )
             etree.SubElement(metadata, '{%s}meta' % ns['o'], name='cover', content='respekt-cover')
             tree.write(opf_path, xml_declaration=True, encoding='utf-8')
         except Exception:
@@ -167,9 +168,7 @@ class Respekt(BasicNewsRecipe):
         raw = self.browser.open_novisit(f"{BASE}/api/downloadEPub?issueId={issue['id']}").read()
         # Without a valid subscription the site redirects to the login page (HTML)
         if not raw.startswith(b'PK'):
-            raise DownloadDenied(
-                f'Vydání {label} se nepodařilo stáhnout. Máte aktivní předplatné, které zahrnuje EPUB?'
-            )
+            raise DownloadDenied(f'Vydání {label} se nepodařilo stáhnout. Máte aktivní předplatné, které zahrnuje EPUB?')
 
         from calibre.utils.zipfile import ZipFile
 
