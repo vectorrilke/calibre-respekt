@@ -16,8 +16,10 @@ The EPUB is unpacked into the recipe's working directory, calibre then finds
 its OPF and converts it like any other recipe output.
 '''
 
+import glob
 import io
 import json
+import os
 import re
 from datetime import date
 
@@ -67,6 +69,58 @@ class Respekt(BasicNewsRecipe):
         if not m:
             raise ValueError(f'Could not find issue list on {BASE}/archiv/{year} - has the site changed?')
         return json.loads(m.group(1))['props']['pageProps'].get('listIssue') or []
+
+    @staticmethod
+    def _cover_url(issue):
+        # coverPhoto url is https://pub-xxx.r2.dev/<id>.jpg; the site serves a
+        # resized version of it through i.respekt.cz (used by the issue page)
+        url = ((issue.get('coverPhoto') or {}).get('image') or {}).get('url')
+        if not url:
+            return None
+        return 'https://i.respekt.cz/' + url.split('://', 1)[-1] + '?width=2048'
+
+    def _set_cover(self, issue):
+        # The recipe does not use calibre's own download machinery, so
+        # get_cover_url() is never called. Instead point the unpacked EPUB's OPF
+        # at the cover of the issue.
+        url = self._cover_url(issue)
+        opfs = glob.glob('**/*.opf', recursive=True)
+        if not url or not opfs:
+            return
+        try:
+            data = self.browser.open_novisit(url).read()
+            if not data:
+                return
+            from lxml import etree
+
+            opf_path = opfs[0]
+            opf_dir = os.path.dirname(os.path.abspath(opf_path))
+            with open(os.path.join(opf_dir, 'respekt_cover.jpg'), 'wb') as f:
+                f.write(data)
+
+            tree = etree.parse(opf_path)
+            ns = {'o': 'http://www.idpf.org/2007/opf'}
+            root = tree.getroot()
+            metadata = root.find('o:metadata', ns)
+            manifest = root.find('o:manifest', ns)
+            for m in metadata.findall('o:meta[@name="cover"]', ns):
+                metadata.remove(m)
+            for item in manifest.findall('o:item', ns):
+                props = (item.get('properties') or '').split()
+                if 'cover-image' in props:
+                    props.remove('cover-image')
+                    if props:
+                        item.set('properties', ' '.join(props))
+                    else:
+                        del item.attrib['properties']
+            for item in manifest.findall('o:item[@id="respekt-cover"]', ns):
+                manifest.remove(item)
+            etree.SubElement(manifest, '{%s}item' % ns['o'], id='respekt-cover', href='respekt_cover.jpg',
+                             **{'media-type': 'image/jpeg', 'properties': 'cover-image'})
+            etree.SubElement(metadata, '{%s}meta' % ns['o'], name='cover', content='respekt-cover')
+            tree.write(opf_path, xml_declaration=True, encoding='utf-8')
+        except Exception:
+            self.log.exception('Failed to set the cover of the issue, keeping the cover from the EPUB')
 
     def _find_issue(self):
         wanted = (self.recipe_specific_options.get('issue') or '').strip()
@@ -122,4 +176,5 @@ class Respekt(BasicNewsRecipe):
         with ZipFile(io.BytesIO(raw)) as zf:
             zf.extractall()
 
+        self._set_cover(issue)
         return 'index.html'
